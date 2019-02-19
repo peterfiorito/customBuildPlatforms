@@ -5,13 +5,23 @@ import CoreMediaPlayer from "./player";
  */
 export default class HlsMediaPlayer extends CoreMediaPlayer implements MediaPlayerInterface {
     private $hlsInstance;
-    private usehlsPlayer;
     init(options: PlayerOptions): void;
     /**
      * Load the stream and fetch metadata
      */
     load(): void;
+    /**
+    * Return player DOM node
+    */
+    getEl(): HTMLMediaElement | undefined;
+    /**
+    * Destroy current player instance
+    */
     destroy(): void;
+    /**
+    * Helper method to check file type from stream url
+    */
+    checkURL(): string;
     /**
      * Set media source url
      */
@@ -28,6 +38,15 @@ export default class HlsMediaPlayer extends CoreMediaPlayer implements MediaPlay
     * Set mime type of media source
     */
     mime: string;
+    /**
+    * Helper methods CSS positioning
+    */
+    private getPlayerCSSProperty;
+    private setPlayerCSSProperty;
+    /**
+    * Get/set media window left alignment
+    */
+    left: number
     /**
      * Provide DRM properties
      */
