@@ -1,7 +1,6 @@
-import DeviceStorageAbstract from "../../abstract/storage";
-import Utils from "./utils";
-export default class HTML5DeviceStorage extends DeviceStorageAbstract {
-    localStorageAvailable: false;
-    utils: Utils;
-    prefix: string;
+import DeviceStorage from "../../abstract/storage";
+/**
+ * Storage class to store key value objects persistent on the client
+ */
+export default class HTML5DeviceStorage extends DeviceStorage {
 }

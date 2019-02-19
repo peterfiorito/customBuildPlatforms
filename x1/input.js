@@ -12,26 +12,34 @@ var __extends = (this && this.__extends) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 var input_1 = require("../../abstract/input");
 // This module maps the platform input devices to a standardized input events
-var X1InputHandler = /** @class */ (function (_super) {
-    __extends(X1InputHandler, _super);
-    function X1InputHandler() {
+var HTML5InputHandler = /** @class */ (function (_super) {
+    __extends(HTML5InputHandler, _super);
+    function HTML5InputHandler() {
         return _super !== null && _super.apply(this, arguments) || this;
     }
-    Object.defineProperty(X1InputHandler.prototype, "keycodes", {
+    Object.defineProperty(HTML5InputHandler.prototype, "keycodes", {
+        // Get keycode definition list for the platform
         get: function () {
             return {
                 "13": "enter",
+                "32": "space",
+                "27": "exit",
                 "8": "return",
-                "179": "play_pause",
+                "73": "info",
+                "84": "tools",
+                "80": "_play",
                 "72": "_pause",
                 "83": "stop",
-                "228": "forward",
-                "227": "rewind",
+                "70": "forward",
+                "87": "rewind",
                 "37": "left",
                 "38": "up",
                 "39": "right",
                 "40": "down",
-                "73": "info",
+                "82": "red",
+                "71": "green",
+                "89": "yellow",
+                "66": "blue",
                 "49": "1",
                 "50": "2",
                 "51": "3",
@@ -44,14 +52,17 @@ var X1InputHandler = /** @class */ (function (_super) {
                 "48": "0",
                 "187": "volumeup",
                 "189": "volumedown",
-                "33": "channelup",
-                "34": "channeldown"
+                "106": "mute",
+                "219": "channelup",
+                "221": "channeldown",
+                "67": "cc",
+                "ctrl": ["tools", "_play", "_pause", "stop", "forward", "rewind", "red", "green", "yellow", "blue", "volumeup", "volumedown", "mute", "channelup", "channeldown"]
             };
         },
         enumerable: true,
         configurable: true
     });
-    return X1InputHandler;
+    return HTML5InputHandler;
 }(input_1.default));
-exports.default = X1InputHandler;
+exports.default = HTML5InputHandler;
 //# sourceMappingURL=input.js.map

@@ -16,8 +16,9 @@ var Logger = require("js-logger");
 var storage_1 = require("./storage");
 
 const videojs = require("video.js");
-const hlsPlugin = window.hls;
-const dashPlugin = window.dashjs;
+const hlsPlugin = require("hls.js");
+const dashPlugin = require("dashjs");
+
 
 var ROBUSTNESS;
 (function (ROBUSTNESS) {
@@ -35,48 +36,22 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
     function HlsMediaPlayer() {
         return _super !== null && _super.apply(this, arguments) || this;
     }
-    HlsMediaPlayer.prototype.checkFileType = function (options) {
-        switch (options.mime) {
-            // HLS
-            case "application/x-mpegURL":
-            case "application/vnd.apple.mpegurl":
-                return "hls";
-            // DASH
-            case "video/vnd.mpeg.dash.mpd":
-            case "application/dash+xml":
-                return "dash";
-            // any other format
-            default:
-                return "mp4";
-        }
+    HlsMediaPlayer.prototype.checkURL = function(url){
+        return url.split(".").pop();
     };
     HlsMediaPlayer.prototype.init = function (options) {
-        // check if it's a live stream
-        let videoFileType = this.checkFileType(options);
-        if (videoFileType != "mp4") {
-            switch (videoFileType) {
-                case "hls":
-                    // add hls option
-                    options['hls'] = {withCredentials: true};
-                    // Initiate videojs as a plain instance
-                    this.$hlsInstance = videojs.default(this.playerId, options);
-                    // create HLS handler and expose it
-                    this.instanceHls = new Hls();
-                    break;
-                case "dash":
-                    // Initiate videojs as a plain instance
-                    this.$hlsInstance = videojs.default(this.playerId, options);
-                    // Register dash
-                    this.instanceDash = dashjs.MediaPlayer().create();
-            }
-            // Set prefered audio language
-            var storage = new storage_1.default();
-            var preferredAudioLanguage = storage.getItem(player_1.PLAYER_STORAGE_KEYS.STORAGE_AUDIO_LANGUAGE);
-            if (preferredAudioLanguage) {
-                this.$hlsInstance.audioTracks.tracks({
-                    preferredAudioLanguage: preferredAudioLanguage,
-                });
-            }
+        options['width'] = 1280;
+        options['height'] = 720;
+        options['top'] = 0;
+        options['left'] = 0;
+        this.$hlsInstance = videojs.default(this.playerId, options);
+        // Set prefered audio language
+        var storage = new storage_1.default();
+        var preferredAudioLanguage = storage.getItem(player_1.PLAYER_STORAGE_KEYS.STORAGE_AUDIO_LANGUAGE);
+        if (preferredAudioLanguage) {
+            this.$hlsInstance.audioTracks.tracks({
+                preferredAudioLanguage: preferredAudioLanguage,
+            });
         }
         _super.prototype.init.call(this, options);
     };
@@ -84,34 +59,40 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
      * Load the stream and fetch metadata
      */
     HlsMediaPlayer.prototype.load = function () {
+        let type = this.checkURL(this._streamURL);
         // check if it's a live stream
-        if (this.$hlsInstance) {
-            if(this.instanceHls){
-                // Need to destroy the existing hls handler and create a new one
-                this.instanceHls.destroy()
-                this.instanceHls = new Hls();
-                try {
-                    this.instanceHls.attachMedia(this.$hlsInstance.children_[0])
-                    this.instanceHls.loadSource(this.$hlsInstance.options_.src);
-                } catch (err) {
-                    Logger.info('PLAYER: error:', error)
-                }
-            } else {
-                // destroy the previous instance of dash and re-create it with a new one
-                if(this.instanceDash.isReady()){
-                    this.instanceDash.reset();
-                    this.instanceDash = dashjs.MediaPlayer().create();
-                }
-                this.instanceDash.initialize(this.$hlsInstance.children_[0], this.$hlsInstance.options_.src, true);
-            }
+        this.destroy();
+        if(type === 'm3u8'){
+            this.instanceHls = new hlsPlugin({maxBufferSize: 5, maxBufferLength: 20, liveBackBufferLength: 0});
+            // Force memory flush
+            this.instanceHls.loadSource(this._streamURL);
+            this.instanceHls.attachMedia(this.$hlsInstance.children_[0]);
+            this.instanceHls.on(hlsPlugin.Events.MANIFEST_PARSED,function() {
+                video.play();
+            });
+
+        } else if (type === 'mpd') {
+            this.instanceDash = dashPlugin.MediaPlayer().create();
+            // Set the buffer low to avoid overflow
+            this.instanceDash.setBufferPruningInterval(1);
+            this.instanceDash.setBufferToKeep(0);
+            this.instanceDash.setBufferTimeAtTopQuality(9);
+            this.instanceDash.initialize(this.$hlsInstance.children_[0], this.$hlsInstance.options_.src, true);
+        } else {
+            this.$hlsInstance.src(this._streamURL);
+            this.$hlsInstance.load();
+            this.$hlsInstance.ready(() => this.$hlsInstance.play());
         }
         _super.prototype.load.call(this);
     };
     HlsMediaPlayer.prototype.destroy = function () {
-        if($hlsInstance) {
-            this.instanceHls.destroy()
+        if(this.instanceHls) {
+            this.instanceHls.destroy();
         }
-        _super.prototype.destroy.call(this);
+        if(this.instanceDash){
+            this.instanceDash.reset();
+        }
+        this.$hlsInstance.children_[0].removeAttribute('src');
     };
     Object.defineProperty(HlsMediaPlayer.prototype, "src", {
         /**
@@ -138,6 +119,7 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
                 this.$hlsInstance.options_.src = streamURL;
             }
             else {
+                this._streamURL = streamURL;
                 var playerElem = this.getEl();
                 if (playerElem) {
                     var sourceElements = playerElem.getElementsByTagName("source");
@@ -195,53 +177,6 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
         enumerable: true,
         configurable: true
     });
-    /**
-     * Provide DRM properties
-     */
-    HlsMediaPlayer.prototype.drm = function (config) {
-        Logger.info("PLAYER: drm - ", config);
-        if (this.$hlsInstance) {
-            switch (config.type) {
-                case player_1.DRM_TYPES.PLAYREADY:
-                    this.$hlsInstance.configure({
-                        drm: {
-                            servers: {
-                                "com.microsoft.playready": this.options.drm.parameters.playReadyInitiatorUrl
-                            },
-                        }
-                    });
-                    break;
-                case player_1.DRM_TYPES.WIDEVINE:
-                    this.$hlsInstance.configure({
-                        drm: {
-                            servers: {
-                                "com.widevine.alpha": this.options.drm.parameters.widevineInitiatorUrl
-                            },
-                            advanced: {
-                                "com.widevine.alpha": {
-                                    "videoRobustness": ROBUSTNESS.SW_SECURE_CRYPTO,
-                                    "audioRobustness": ROBUSTNESS.SW_SECURE_CRYPTO,
-                                    "serverCertificate": videojs.util.Uint8ArrayUtils.fromBase64("")
-                                }
-                            }
-                        }
-                    });
-                    break;
-            }
-            // Add network binding for custom data token
-            if (config.parameters.customData)
-                this.$hlsInstance.getNetworkingEngine().registerRequestFilter(function (type, request) {
-                    // Only add headers to license requests:
-                    if (type == videojs.net.NetworkingEngine.RequestType.LICENSE) {
-                        // This is the specific header name and value the server wants:
-                        request.headers["licenseRequestToken"] = config.parameters.customData;
-                    }
-                });
-        }
-        else {
-            return _super.prototype.drm.call(this, config);
-        }
-    };
     Object.defineProperty(HlsMediaPlayer.prototype, "audioTrack", {
         get: function () {
             var track = {
@@ -315,9 +250,19 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
         enumerable: true,
         configurable: true
     });
-    /**
-     * Get all audio tracks
-     */
+    Object.defineProperty(HlsMediaPlayer.prototype, "left", {
+        /**
+         * Get/set media window left alignment
+         */
+        get: function () {
+            return this.getPlayerCSSProperty("left");
+        },
+        set: function (position) {
+            this.setPlayerCSSProperty(position, "left");
+        },
+        enumerable: true,
+        configurable: true
+    });
     HlsMediaPlayer.prototype.allAudioTracks = function () {
         var result = [];
         if (this.$hlsInstance) {
@@ -331,174 +276,36 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
             }
         }
         else {
-            result = _super.prototype.allAudioTracks.call(this);
+            //result = _super.prototype.allAudioTracks.call(this);
         }
         Logger.info("PLAYER: allAudioTracks - ", result);
         return result;
     };
-    Object.defineProperty(HlsMediaPlayer.prototype, "subtitleActive", {
-        /**
-         * Get disable/enable subtitle
-         */
-        get: function () {
-            if (this.$hlsInstance) {
-                return this.$hlsInstance.isTextTrackVisible();
-            }
-            else {
-                var playerElem = this.getEl();
-                if (playerElem) {
-                    var tracks = playerElem.textTracks || [];
-                    for (var index = 0; index < tracks.length; index++) {
-                        var textTrack = tracks[index];
-                        if (textTrack.mode === "showing") {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                else {
-                    return false;
-                }
-            }
-        },
-        /**
-         * Set disable/enable subtitle
-         */
-        set: function (state) {
-            var storage = new storage_1.default();
-            // When subtitle should be activated
-            if (state) {
-                // Check if there are subtitles available
-                var subtitleTracks = this.allSubtitleTracks();
-                if (subtitleTracks.length === 0)
-                    return;
-                // Get last default subtitle language
-                var lastTrackLanguage = storage.getItem(player_1.PLAYER_STORAGE_KEYS.STORAGE_SUBTITLE_LANGUAGE);
-                var track = subtitleTracks[0];
-                for (var _i = 0, _a = Array.from(subtitleTracks); _i < _a.length; _i++) {
-                    var subtitleTrack = _a[_i];
-                    if (lastTrackLanguage === subtitleTrack.language) {
-                        track = subtitleTrack;
-                    }
-                }
-                // Set subtitle active
-                storage.setItem(player_1.PLAYER_STORAGE_KEYS.STORAGE_SUBTITLE_ACTIVE, JSON.stringify(true));
-                this.subtitleTrack = track;
-                // When subtitle should be activated
-            }
-            else {
-                if (this.$hlsInstance) {
-                    this.$hlsInstance.setTextTrackVisibility(false);
-                }
-                else {
-                    var playerElem = this.getEl();
-                    var tracks = playerElem.textTracks || [];
-                    for (var index = 0; index < tracks.length; index++) {
-                        playerElem.textTracks[index].mode = "hidden";
-                    }
-                }
-                storage.setItem(player_1.PLAYER_STORAGE_KEYS.STORAGE_SUBTITLE_ACTIVE, JSON.stringify(false));
-            }
-        },
-        enumerable: true,
-        configurable: true
-    });
-    Object.defineProperty(HlsMediaPlayer.prototype, "subtitleTrack", {
-        get: function () {
-            var track = {
-                language: "",
-                index: 0
-            };
-            if (this.$hlsInstance) {
-                var tracks = this.$hlsInstance.getTextTracks() || [];
-                for (var index = 0; index < tracks.length; index++) {
-                    var textTrack = tracks[index];
-                    if (textTrack.active) {
-                        track = {
-                            language: textTrack.language,
-                            index: index
-                        };
-                    }
-                }
-            }
-            else {
-                var playerElem = this.getEl();
-                if (playerElem) {
-                    var tracks = playerElem.textTracks || [];
-                    for (var index = 0; index < tracks.length; index++) {
-                        var textTrack = tracks[index];
-                        if (textTrack.mode === "showing") {
-                            track = {
-                                language: textTrack.language,
-                                index: index
-                            };
-                        }
-                    }
-                }
-            }
-            return track;
-        },
-        /**
-         * Set subtitle track
-         */
-        set: function (track) {
-            Logger.info("PLAYER: subtitleTrack:'" + track + "'");
-            // Save last used subtitle language as default
-            var storage = new storage_1.default();
-            storage.setItem(player_1.PLAYER_STORAGE_KEYS.STORAGE_SUBTITLE_LANGUAGE, track.language);
-            if (this.$hlsInstance) {
-                if (track.index !== undefined) {
-                    var textTrack = this.$hlsInstance.getTextTracks()[track.index];
-                    if (textTrack) {
-                        this.$hlsInstance.selectTextTrack(textTrack);
-                        this.$hlsInstance.setTextTrackVisibility(true);
-                    }
-                }
-                else {
-                    var tracks = this.$hlsInstance.getTextTracks() || [];
-                    for (var index = 0; index < tracks.length; index++) {
-                        if (tracks[index].language === track.language) {
-                            this.$hlsInstance.selectTextTrack(tracks[index]);
-                            this.$hlsInstance.setTextTrackVisibility(true);
-                        }
-                    }
-                }
-            }
-            else {
-                var playerElem = this.getEl();
-                if (playerElem) {
-                    if (track.index !== undefined) {
-                        playerElem.textTracks[track.index].mode = "showing";
-                    }
-                    else {
-                        var tracks = playerElem.textTracks || [];
-                        for (var index = 0; index < tracks.length; index++) {
-                            if (tracks[index].language === track.language) {
-                                playerElem.textTracks[index].mode = "showing";
-                            }
-                            else {
-                                playerElem.textTracks[index].mode === "hidden";
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        enumerable: true,
-        configurable: true
-    });
-    /**
-     * Get all subtitle tracks
-     */
-    HlsMediaPlayer.prototype.allSubtitleTracks = function () {
-        result = _super.prototype.allSubtitleTracks.call(this);
-    return result;
+    HlsMediaPlayer.prototype.getEl = function () {
+        if (this.$hlsInstance)
+            return this.$hlsInstance.children_[0];
+        var el = document.getElementById(this.playerId);
+        if (el) {
+            return this.$playerElem = el;
+        }
+        else {
+            return undefined;
+        }
     };
-    /**
-     * Sets the external captions
-     */
-    HlsMediaPlayer.prototype.setExternalSubtitles = function (textTracks) {
-        _super.prototype.setExternalSubtitles.call(this, textTracks);
+    HlsMediaPlayer.prototype.getPlayerCSSProperty = function (property) {
+        var playerElem = this.getEl();
+        if (playerElem) {
+            return parseInt(getComputedStyle(playerElem, undefined).getPropertyValue(property));
+        }
+        else {
+            return 0;
+        }
+    };
+    HlsMediaPlayer.prototype.setPlayerCSSProperty = function (position, property) {
+        var playerElem = this.getEl();
+        if (playerElem) {
+            playerElem.style[property] = position + "px";
+        }
     };
     return HlsMediaPlayer;
 }(player_2.default));
