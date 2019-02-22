@@ -67,10 +67,6 @@ var HlsMediaPlayer = /** @class */ (function (_super) {
             // Force memory flush
             this.instanceHls.loadSource(this._streamURL);
             this.instanceHls.attachMedia(this.$hlsInstance.children_[0]);
-            this.instanceHls.on(hlsPlugin.Events.MANIFEST_PARSED,function() {
-                video.play();
-            });
-
         } else if (type === 'mpd') {
             this.instanceDash = dashPlugin.MediaPlayer().create();
             // Set the buffer low to avoid overflow
